@@ -128,8 +128,6 @@ pub use painter::CallbackFn;
 ///
 ///
 pub struct EguiMq {
-    /// The DPI as reported by miniquad.
-    native_dpi_scale: f32,
     /// Pixels per point from egui. Can differ from native DPI because egui allows zooming.
     pixels_per_point: f32,
     egui_ctx: egui::Context,
@@ -141,11 +139,8 @@ pub struct EguiMq {
 
 impl EguiMq {
     pub fn new(mq_ctx: &mut dyn mq::RenderingBackend) -> Self {
-        let native_dpi_scale = miniquad::window::dpi_scale();
-
         Self {
-            native_dpi_scale,
-            pixels_per_point: native_dpi_scale,
+            pixels_per_point: miniquad::window::dpi_scale(),
             egui_ctx: egui::Context::default(),
             painter: painter::Painter::new(mq_ctx),
             egui_input: egui::RawInput::default(),
@@ -172,19 +167,17 @@ impl EguiMq {
         mq_ctx: &mut dyn mq::RenderingBackend,
         mut run_ui: impl FnMut(&mut dyn mq::RenderingBackend, &mut egui::Ui),
     ) {
-        input::on_frame_start(&mut self.egui_input, &self.egui_ctx);
-
-        if self.native_dpi_scale != miniquad::window::dpi_scale() {
-            // DPI scale change (maybe new monitor?). Tell egui to change:
-            self.native_dpi_scale = miniquad::window::dpi_scale();
-            if let Some(viewport) = self
-                .egui_input
-                .viewports
-                .get_mut(&self.egui_input.viewport_id)
-            {
-                viewport.native_pixels_per_point = Some(self.native_dpi_scale);
-            }
+        // egui only learns the DPI from its input
+        if let Some(viewport) = self
+            .egui_input
+            .viewports
+            .get_mut(&self.egui_input.viewport_id)
+        {
+            viewport.native_pixels_per_point = Some(miniquad::window::dpi_scale());
         }
+
+        let pixels_per_point = self.input_pixels_per_point();
+        input::on_frame_start(&mut self.egui_input, pixels_per_point);
 
         let full_output = self
             .egui_ctx
@@ -253,11 +246,18 @@ impl EguiMq {
         }
     }
 
+    /// The pixels per point that egui will use for the input being gathered.
+    /// `egui_ctx.pixels_per_point()` is from the last frame, so it lags behind DPI changes (and the starting DPI).
+    /// The DPI is read each time because miniquad scales each mouse position by the DPI when the event arrives.
+    fn input_pixels_per_point(&self) -> f32 {
+        self.egui_ctx.zoom_factor() * miniquad::window::dpi_scale()
+    }
+
     /// Call from your [`miniquad::EventHandler`].
     pub fn mouse_motion_event(&mut self, x: f32, y: f32) {
         let pos = egui::pos2(
-            x / self.egui_ctx.pixels_per_point(),
-            y / self.egui_ctx.pixels_per_point(),
+            x / self.input_pixels_per_point(),
+            y / self.input_pixels_per_point(),
         );
         self.egui_input.events.push(egui::Event::PointerMoved(pos));
     }
@@ -278,8 +278,8 @@ impl EguiMq {
     /// Call from your [`miniquad::EventHandler`].
     pub fn mouse_button_down_event(&mut self, mb: mq::MouseButton, x: f32, y: f32) {
         let pos = egui::pos2(
-            x / self.egui_ctx.pixels_per_point(),
-            y / self.egui_ctx.pixels_per_point(),
+            x / self.input_pixels_per_point(),
+            y / self.input_pixels_per_point(),
         );
         let button = to_egui_button(mb);
         self.egui_input.events.push(egui::Event::PointerButton {
@@ -293,8 +293,8 @@ impl EguiMq {
     /// Call from your [`miniquad::EventHandler`].
     pub fn mouse_button_up_event(&mut self, mb: mq::MouseButton, x: f32, y: f32) {
         let pos = egui::pos2(
-            x / self.egui_ctx.pixels_per_point(),
-            y / self.egui_ctx.pixels_per_point(),
+            x / self.input_pixels_per_point(),
+            y / self.input_pixels_per_point(),
         );
         let button = to_egui_button(mb);
 
